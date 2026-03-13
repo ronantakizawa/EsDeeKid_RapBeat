@@ -28,6 +28,7 @@ from collections import defaultdict
 from math import gcd
 from scipy import signal
 from scipy.signal import fftconvolve
+from scipy.io import wavfile
 import soundfile as sf
 from pydub import AudioSegment
 import mido
@@ -39,8 +40,15 @@ OUTPUT   = '/Users/ronantakizawa/Documents/EsDeeKid_RapBeat'
 INST     = '/Users/ronantakizawa/Documents/instruments/☆ Juicy Jules - Stardust ☆/☆ Juicy Jules - Stardust ☆'
 FULL_MID = os.path.join(OUTPUT, 'DirtyPhantom_FULL.mid')
 FIXED_MID= os.path.join(OUTPUT, 'DirtyPhantom_FIXED.mid')
-OUT_WAV  = os.path.join(OUTPUT, 'DirtyPhantom.wav')
-OUT_MP3  = os.path.join(OUTPUT, 'DirtyPhantom.mp3')
+
+import glob as _glob
+_existing = _glob.glob(os.path.join(OUTPUT, 'DirtyPhantom_v*.mp3'))
+_version  = max([int(os.path.basename(p).split('_v')[1].split('.')[0])
+                 for p in _existing], default=0) + 1
+_vstr    = f'v{_version}'
+OUT_WAV  = os.path.join(OUTPUT, f'DirtyPhantom_{_vstr}.wav')
+OUT_MP3  = os.path.join(OUTPUT, f'DirtyPhantom_{_vstr}.mp3')
+print(f'Output version: {_vstr}  →  {OUT_MP3}')
 
 SR      = 44100
 NYQ     = SR / 2.0
@@ -172,21 +180,14 @@ cutoff = 800.0 + lfo * 1200.0;
 process = osc * env * gain * 0.40 : fi.lowpass(2, cutoff) <: _, _;
 """
 
-# ── MELODY TIMBRE RULE (do not change) ────────────────────────────────────────
-# EsDeeKid melody must be a lowkey background texture, never a cutting lead.
-# Oscillator: sine(0.65) + triangle(0.35) — smooth, no harsh harmonics.
-# Slow attack (0.15s) ensures the note fades in gently rather than snapping.
-# Internal gain capped at 0.32 — changing this will make the melody too present.
-# Render volume (vol=) and mix coefficient are also intentionally kept low.
-# ──────────────────────────────────────────────────────────────────────────────
 LEAD_DSP = """
 import("stdfaust.lib");
 freq = hslider("freq[unit:Hz]", 440, 0.001, 20000, 0.001);
 gain = hslider("gain", 1, 0, 1, 0.01);
 gate = button("gate");
-osc  = os.osc(freq) * 0.65 + os.triangle(freq) * 0.35;  // sine+triangle: soft, no harsh harmonics
-env  = en.adsr(0.15, 0.25, 0.60, 1.2, gate);             // slow attack = gentle fade-in
-process = osc * env * gain * 0.32 <: _, _;               // 0.32 cap keeps it lowkey — do not raise
+osc  = os.sawtooth(freq) * 0.85 + os.square(freq) * 0.15;
+env  = en.adsr(0.05, 0.20, 0.65, 1.0, gate);
+process = osc * env * gain * 0.42 <: _, _;
 """
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -210,29 +211,21 @@ print(f'  ✓  FIXED_MID saved  ({len(mid.tracks)} tracks)')
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 1 — Load Juicy Jules samples
 # ══════════════════════════════════════════════════════════════════════════════
-JERK = '/Users/ronantakizawa/Documents/instruments/VIRION - BLESSDEEKIT [JERK DRUMKIT]'
-
-print('\nStep 1: Loading samples …')
-print('  Drums  → VIRION BLESSDEEKIT (jerk-specific kit, round-robin)')
-print('  808/FX → Juicy Jules Stardust')
-
-# VIRION BLESSDEEKIT — load all variants per category for round-robin selection
-# Round-robin: each hit picks a random variant → more natural, less machine-gun sound
-KICKS   = [load_sample(f'{JERK}/Kick/Kick ({i}).wav')   for i in range(1, 6)]
-SNARES  = [load_sample(f'{JERK}/Snare/Snare ({i}).wav') for i in range(1, 21)]
-HH_CLS  = [load_sample(f'{JERK}/Hi-Hat/Hi-Hat ({i}).wav')   for i in range(1, 6)]
-HH_OPS  = [load_sample(f'{JERK}/Open Hat/Open Hat ({i}).wav') for i in range(1, 6)]
-CRASHES = [load_sample(f'{JERK}/Crash/Crash ({i}).wav') for i in range(1, 6)]
-PERCS   = [load_sample(f'{JERK}/Perc/Perc ({i}).wav')   for i in range(1, 6)]
-
-# Juicy Jules — 808 + FX (keep these; VIRION 808s untested for tuning)
+print('\nStep 1: Loading Juicy Jules samples …')
+KICK     = load_sample(f'{INST}/☆ Kicks/Kick - Distorted.wav')
+SNARE    = load_sample(f'{INST}/☆ Snares/Snare - Strike.wav')
 CLAP     = load_sample(f'{INST}/☆ Claps/Clap - Layer.wav')
+HH_CL    = load_sample(f'{INST}/☆ Closed Hats/HH - 1.wav')
+HH_OP    = load_sample(f'{INST}/☆ Open Hats/OH - Long.wav')
+CRASH    = load_sample(f'{INST}/☆ Crashes/Crash - Classic.wav')
 LASER    = load_sample(f'{INST}/☆ FX/FX - Laser.wav')
 UGH      = load_sample(f'{INST}/☆ FX/FX - Ugh.wav')
 BASS_808 = load_sample(f'{INST}/☆ 808s/808 - Dark.wav')
 
-# No hi-hat pitch shift — keeps spectral centroid higher (fix #1)
-print(f'  Kicks={len(KICKS)}  Snares={len(SNARES)}  HH={len(HH_CLS)}  OH={len(HH_OPS)}  808={len(BASS_808)/SR:.2f}s')
+# Pitch hi-hats down slightly for darker feel
+HH_CL = pb.Pedalboard([pb.PitchShift(semitones=-2)])(HH_CL[np.newaxis, :], SR)[0]
+HH_OP = pb.Pedalboard([pb.PitchShift(semitones=-1)])(HH_OP[np.newaxis, :], SR)[0]
+print(f'  Kick={len(KICK)/SR:.2f}s  Snare={len(SNARE)/SR:.2f}s  808={len(BASS_808)/SR:.2f}s')
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 2 — Drums (real samples + pyroomacoustics room IR)
@@ -264,62 +257,54 @@ for sec, note_num, vel, _ in drum_events:
         continue
     g = vel / 127.0
 
-    if note_num == 36:   # Kick — round-robin from 5 variants, tight (no jitter)
-        snd = KICKS[rng.randint(0, len(KICKS))] * g
+    if note_num == 36:   # Kick — tight, no jitter
+        snd = KICK * g
         e = min(base_start + len(snd), NSAMP)
         chunk = snd[:e - base_start]
         kick_env[base_start:e] += np.abs(chunk)
         drum_L[base_start:e]   += chunk * 0.95
         drum_R[base_start:e]   += chunk * 0.95
 
-    elif note_num == 38:   # Snare — round-robin from 20 variants (main + ghost)
+    elif note_num == 38:   # Snare (main vel=95-100 and ghost vel=30-35)
         jitter = rng.randint(-MAX_JITTER // 2, MAX_JITTER // 2 + 1)
         start  = int(np.clip(base_start + jitter, 0, NSAMP - 1))
-        snd = SNARES[rng.randint(0, len(SNARES))] * g * rng.uniform(0.93, 1.07)
+        snd = SNARE * g * rng.uniform(0.93, 1.07)
         e   = min(start + len(snd), NSAMP)
         drum_L[start:e] += snd[:e - start] * 0.95
         drum_R[start:e] += snd[:e - start] * 0.95
 
-    elif note_num == 39:   # Clap layer (Juicy Jules — only on main snare beats)
+    elif note_num == 39:   # Clap layer (only on main snare beats)
         snd = CLAP * g * rng.uniform(0.92, 1.08)
         e   = min(base_start + len(snd), NSAMP)
         drum_L[base_start:e] += snd[:e - base_start] * 0.85
         drum_R[base_start:e] += snd[:e - base_start] * 0.85
 
-    elif note_num == 42:   # Closed HH — round-robin, pan alternating
+    elif note_num == 42:   # Closed HH — pan alternating
         pan_toggle = not pan_toggle
         jitter = rng.randint(-MAX_JITTER, MAX_JITTER + 1)
         start  = int(np.clip(base_start + jitter, 0, NSAMP - 1))
-        v   = g * rng.uniform(0.70, 1.00)
-        snd = HH_CLS[rng.randint(0, len(HH_CLS))] * v
+        v  = g * rng.uniform(0.70, 1.00)
+        snd = HH_CL * v
         pr  = 0.62 if pan_toggle else 0.38
         e   = min(start + len(snd), NSAMP)
-        ch  = snd[:e - start] * 0.60   # raised from 0.55 (fix #1: more high-freq presence)
+        ch  = snd[:e - start] * 0.55
         drum_L[start:e] += ch * (1 - pr) * 2
         drum_R[start:e] += ch * pr * 2
 
-    elif note_num == 46:   # Open HH — round-robin
+    elif note_num == 46:   # Open HH
         jitter = rng.randint(-MAX_JITTER // 2, MAX_JITTER // 2 + 1)
         start  = int(np.clip(base_start + jitter, 0, NSAMP - 1))
-        v   = g * rng.uniform(0.70, 0.95)
-        snd = HH_OPS[rng.randint(0, len(HH_OPS))] * v
+        v  = g * rng.uniform(0.70, 0.95)
+        snd = HH_OP * v
         e   = min(start + len(snd), NSAMP)
-        drum_L[start:e] += snd[:e - start] * 0.62   # raised from 0.50 (fix #1)
-        drum_R[start:e] += snd[:e - start] * 0.62
+        drum_L[start:e] += snd[:e - start] * 0.50
+        drum_R[start:e] += snd[:e - start] * 0.50
 
-    elif note_num == 49:   # Crash — round-robin
-        snd = CRASHES[rng.randint(0, len(CRASHES))] * g * 0.65
+    elif note_num == 49:   # Crash
+        snd = CRASH * g * 0.65
         e   = min(base_start + len(snd), NSAMP)
         drum_L[base_start:e] += snd[:e - base_start] * 0.48
         drum_R[base_start:e] += snd[:e - base_start] * 0.52
-
-# VIRION Percs — placed on every 4-bar boundary in Drop sections for extra texture
-for perc_bar in list(range(8, 40, 4)) + list(range(48, 60, 4)):
-    s   = int(perc_bar * BAR * SR)
-    snd = PERCS[rng.randint(0, len(PERCS))] * 0.35
-    e   = min(s + len(snd), NSAMP)
-    drum_L[s:e] += snd[:e - s] * 0.55
-    drum_R[s:e] += snd[:e - s] * 0.45
 
 # Apply room IR (8% wet — dryer than witch house)
 dl_room = fftconvolve(drum_L, room_ir, mode='full')[:NSAMP]
@@ -345,7 +330,7 @@ print('\nStep 3: Building 808 bass …')
 # Same shift as Db chord in render5.py — empirically confirmed
 board_808 = pb.Pedalboard([
     pb.PitchShift(semitones=13),
-    pb.LowpassFilter(cutoff_frequency_hz=450),   # raised from 280 — lets 808 growl/harmonics through
+    pb.LowpassFilter(cutoff_frequency_hz=350),
     pb.Gain(gain_db=2.0),
 ])
 pitched_808 = board_808(BASS_808[np.newaxis, :], SR)[0].astype(np.float32)
@@ -434,7 +419,7 @@ pad_buf[:, 1] *= (sc_gain * 0.25 + 0.75)
 
 pad_board = pb.Pedalboard([
     pb.Reverb(room_size=0.60, damping=0.55, wet_level=0.30, dry_level=0.90, width=0.90),
-    pb.LowpassFilter(cutoff_frequency_hz=6000),   # raised from 4500 — more presence, closer to reference centroid
+    pb.LowpassFilter(cutoff_frequency_hz=11000),
     pb.Compressor(threshold_db=-18, ratio=2.5, attack_ms=30, release_ms=400),
     pb.Gain(gain_db=1.0),
 ])
@@ -452,23 +437,15 @@ all_mel = humanize_notes(
     timing_ms=10, vel_range=6)
 
 freq_a, gate_a, gain_a = make_automation(all_mel)
-lead_buf = faust_render(LEAD_DSP, freq_a, gate_a, gain_a, vol=0.55)[:NSAMP]  # 0.55 max — melody stays quiet
+lead_buf = faust_render(LEAD_DSP, freq_a, gate_a, gain_a, vol=0.80)[:NSAMP]
 
 lead_board = pb.Pedalboard([
-    pb.HighpassFilter(cutoff_frequency_hz=250),   # carve sub from melody so 808 owns low end
     pb.Reverb(room_size=0.45, damping=0.65, wet_level=0.20, dry_level=0.95, width=0.80),
     pb.LowpassFilter(cutoff_frequency_hz=9000),
     pb.Compressor(threshold_db=-16, ratio=2.5, attack_ms=10, release_ms=200),
     pb.Gain(gain_db=1.5),
 ])
 lead_buf = apply_pb(lead_buf, lead_board)
-
-# LFO volume automation on melody (Tutorial 1: "LFO volume automation on melody")
-# Slow waver at 0.35 Hz gives the hypnotic breathing feel characteristic of EsDeeKid leads.
-_t   = np.arange(NSAMP, dtype=np.float32) / SR
-_lfo = (0.78 + 0.22 * np.sin(2 * np.pi * 0.35 * _t)).astype(np.float32)
-lead_buf[:, 0] *= _lfo
-lead_buf[:, 1] *= _lfo
 print(f'  ✓  Lead rendered  notes={len(all_mel)}  max={np.abs(lead_buf).max():.3f}')
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -529,7 +506,7 @@ vocal_stereo = np.stack([vocal_L, vocal_R], axis=1)
 mix = (drum_stereo   * 0.85 +
        bass_stereo   * 0.82 +
        pad_buf       * 0.65 +
-       lead_buf      * 0.45 +  # 0.45 max — melody is a background texture, not a lead (do not raise)
+       lead_buf      * 0.78 +
        vocal_stereo  * 0.88 +
        atmos_stereo  * 0.80)
 
@@ -542,9 +519,9 @@ print('Step 9: Master chain (soft clipper) …')
 master_board = pb.Pedalboard([
     pb.HighpassFilter(cutoff_frequency_hz=30),
     pb.LowpassFilter(cutoff_frequency_hz=18000),
-    pb.Compressor(threshold_db=-10, ratio=1.5, attack_ms=35, release_ms=250),  # looser: more dynamic range (fix #2)
+    pb.Compressor(threshold_db=-10, ratio=2.0, attack_ms=20, release_ms=250),
     pb.Distortion(drive_db=8.0),   # SOFT CLIPPER — critical EsDeeKid signature
-    pb.Gain(gain_db=0.5),          # reduced from 2.0 dB — bring level closer to reference -8.5 LUFS (fix #3)
+    pb.Gain(gain_db=2.0),
     pb.Limiter(threshold_db=-0.5),
 ])
 mix = apply_pb(mix, master_board)
@@ -553,42 +530,19 @@ mix  = mix[:trim]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 10 — Export WAV + MP3
-#
-# WAV: written as 32-bit float so the file is bit-for-bit identical to the
-#      in-memory mix — no int16 quantisation, no hard-clip artefacts.
-#
-# MP3: encoded directly from the float32 WAV via ffmpeg at 320 kbps VBR-0
-#      (highest quality).  Bypassing the old int16→pydub roundtrip means the
-#      MP3 encoder sees exactly the same signal as the WAV, so the two files
-#      sound as similar as lossy encoding allows.
 # ══════════════════════════════════════════════════════════════════════════════
-import subprocess
-
 print('Step 10: Exporting …')
-
-# WAV — 32-bit float, stereo, 44100 Hz
-sf.write(OUT_WAV, mix, SR, subtype='FLOAT')
+out_i16 = (mix * 32767).clip(-32767, 32767).astype(np.int16)
+wavfile.write(OUT_WAV, SR, out_i16)
 print(f'  ✓  WAV: {os.path.getsize(OUT_WAV)/1e6:.1f} MB')
 
-# MP3 — ffmpeg, 320 kbps, directly from the float32 WAV
-ffmpeg_cmd = [
-    'ffmpeg', '-y',
-    '-i', OUT_WAV,
-    '-codec:a', 'libmp3lame',
-    '-b:a', '320k',
-    '-q:a', '0',          # VBR quality 0 = highest
-    '-id3v2_version', '3',
-    '-metadata', 'title=Dirty Phantom',
-    '-metadata', 'artist=Claude Code',
-    '-metadata', 'album=EsDeeKid Type Beat',
-    '-metadata', 'genre=Jerk / Underground Rap',
-    OUT_MP3,
-]
-result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
-if result.returncode != 0:
-    raise RuntimeError(f'ffmpeg failed:\n{result.stderr}')
-
-duration_s = int(os.path.getsize(OUT_WAV) / (SR * 4 * 2))   # float32 stereo
-m, s = divmod(duration_s, 60)
+seg = AudioSegment.from_wav(OUT_WAV)
+seg.export(OUT_MP3, format='mp3', bitrate='192k', tags={
+    'title':  f'Dirty Phantom {_vstr}',
+    'artist': 'Claude Code',
+    'album':  'EsDeeKid Type Beat',
+    'genre':  'Jerk / Underground Rap',
+})
+m, s = divmod(int(len(seg) / 1000), 60)
 print(f'  ✓  MP3: {os.path.getsize(OUT_MP3)/1e6:.1f} MB  |  {m}:{s:02d}')
 print('\nDone!')
