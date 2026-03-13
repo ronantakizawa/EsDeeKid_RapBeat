@@ -330,7 +330,7 @@ print('\nStep 3: Building 808 bass …')
 # Same shift as Db chord in render5.py — empirically confirmed
 board_808 = pb.Pedalboard([
     pb.PitchShift(semitones=13),
-    pb.LowpassFilter(cutoff_frequency_hz=350),
+    pb.LowpassFilter(cutoff_frequency_hz=450),   # raised from 280 — lets 808 growl/harmonics through
     pb.Gain(gain_db=2.0),
 ])
 pitched_808 = board_808(BASS_808[np.newaxis, :], SR)[0].astype(np.float32)
@@ -419,7 +419,7 @@ pad_buf[:, 1] *= (sc_gain * 0.25 + 0.75)
 
 pad_board = pb.Pedalboard([
     pb.Reverb(room_size=0.60, damping=0.55, wet_level=0.30, dry_level=0.90, width=0.90),
-    pb.LowpassFilter(cutoff_frequency_hz=11000),
+    pb.LowpassFilter(cutoff_frequency_hz=4500),   # darkened from 11k — moody atmospheric pad
     pb.Compressor(threshold_db=-18, ratio=2.5, attack_ms=30, release_ms=400),
     pb.Gain(gain_db=1.0),
 ])
@@ -440,12 +440,20 @@ freq_a, gate_a, gain_a = make_automation(all_mel)
 lead_buf = faust_render(LEAD_DSP, freq_a, gate_a, gain_a, vol=0.55)[:NSAMP]  # 0.55 max — melody stays quiet
 
 lead_board = pb.Pedalboard([
+    pb.HighpassFilter(cutoff_frequency_hz=250),   # carve sub from melody so 808 owns low end
     pb.Reverb(room_size=0.45, damping=0.65, wet_level=0.20, dry_level=0.95, width=0.80),
     pb.LowpassFilter(cutoff_frequency_hz=9000),
     pb.Compressor(threshold_db=-16, ratio=2.5, attack_ms=10, release_ms=200),
     pb.Gain(gain_db=1.5),
 ])
 lead_buf = apply_pb(lead_buf, lead_board)
+
+# LFO volume automation on melody (Tutorial 1: "LFO volume automation on melody")
+# Slow waver at 0.35 Hz gives the hypnotic breathing feel characteristic of EsDeeKid leads.
+_t   = np.arange(NSAMP, dtype=np.float32) / SR
+_lfo = (0.78 + 0.22 * np.sin(2 * np.pi * 0.35 * _t)).astype(np.float32)
+lead_buf[:, 0] *= _lfo
+lead_buf[:, 1] *= _lfo
 print(f'  ✓  Lead rendered  notes={len(all_mel)}  max={np.abs(lead_buf).max():.3f}')
 
 # ══════════════════════════════════════════════════════════════════════════════

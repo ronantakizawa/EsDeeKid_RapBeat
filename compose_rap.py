@@ -186,18 +186,31 @@ def create_808():
 
 
 # ─────────────────────────────────────────────────────────────
-# CHORDS / PAD  (C# minor whole notes — simple loop)
+# CHORDS / PAD  (4-bar cycle: i – VI – III – VII in C# minor)
+#
+# Progression:
+#   Bar %4 == 0: C# minor  (C#3, E3, G#3)   — tonic
+#   Bar %4 == 1: A major   (A2,  C#3, E3)   — VI  (relative major area)
+#   Bar %4 == 2: E major   (E3,  G#3, B3)   — III (bright lift)
+#   Bar %4 == 3: B major   (B2,  D#3, F#3)  — VII (semitone tension → tonic)
+#
+# All chord tones are diatonic to C# natural minor except D# (leading tone
+# in B major) which creates the semitone tension Tutorial 3 described.
 # ─────────────────────────────────────────────────────────────
 def create_chords():
     part = stream.Part()
     part.partName = 'Chords Pad'
     part.insert(0, tempo.MetronomeMark(number=BPM))
 
-    # C# minor: C#3, E3, G#3
-    CHORD = ['C#3', 'E3', 'G#3']
+    PROG = [
+        ['C#3', 'E3',  'G#3'],   # i   – C# minor
+        ['A2',  'C#3', 'E3' ],   # VI  – A major
+        ['E3',  'G#3', 'B3' ],   # III – E major
+        ['B2',  'D#3', 'F#3'],   # VII – B major (semitone tension)
+    ]
 
     def pad(bar, vel=55):
-        c = chord.Chord(CHORD, quarterLength=4.0)
+        c = chord.Chord(PROG[bar % 4], quarterLength=4.0)
         c.volume.velocity = vel
         part.insert(bb(bar), c)
 
