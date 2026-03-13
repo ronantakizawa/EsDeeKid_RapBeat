@@ -178,9 +178,9 @@ import("stdfaust.lib");
 freq = hslider("freq[unit:Hz]", 440, 0.001, 20000, 0.001);
 gain = hslider("gain", 1, 0, 1, 0.01);
 gate = button("gate");
-osc  = os.sawtooth(freq) * 0.85 + os.square(freq) * 0.15;
-env  = en.adsr(0.05, 0.20, 0.65, 1.0, gate);
-process = osc * env * gain * 0.42 <: _, _;
+osc  = os.osc(freq) * 0.65 + os.triangle(freq) * 0.35;
+env  = en.adsr(0.15, 0.25, 0.60, 1.2, gate);
+process = osc * env * gain * 0.32 <: _, _;
 """
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -430,7 +430,7 @@ all_mel = humanize_notes(
     timing_ms=10, vel_range=6)
 
 freq_a, gate_a, gain_a = make_automation(all_mel)
-lead_buf = faust_render(LEAD_DSP, freq_a, gate_a, gain_a, vol=0.80)[:NSAMP]
+lead_buf = faust_render(LEAD_DSP, freq_a, gate_a, gain_a, vol=0.55)[:NSAMP]
 
 lead_board = pb.Pedalboard([
     pb.Reverb(room_size=0.45, damping=0.65, wet_level=0.20, dry_level=0.95, width=0.80),
@@ -499,7 +499,7 @@ vocal_stereo = np.stack([vocal_L, vocal_R], axis=1)
 mix = (drum_stereo   * 0.85 +
        bass_stereo   * 0.82 +
        pad_buf       * 0.65 +
-       lead_buf      * 0.78 +
+       lead_buf      * 0.45 +
        vocal_stereo  * 0.88 +
        atmos_stereo  * 0.80)
 
