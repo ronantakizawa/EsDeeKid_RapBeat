@@ -28,7 +28,6 @@ from collections import defaultdict
 from math import gcd
 from scipy import signal
 from scipy.signal import fftconvolve
-from scipy.io import wavfile
 import soundfile as sf
 from pydub import AudioSegment
 import mido
@@ -538,19 +537,42 @@ mix  = mix[:trim]
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 10 — Export WAV + MP3
+#
+# WAV: written as 32-bit float so the file is bit-for-bit identical to the
+#      in-memory mix — no int16 quantisation, no hard-clip artefacts.
+#
+# MP3: encoded directly from the float32 WAV via ffmpeg at 320 kbps VBR-0
+#      (highest quality).  Bypassing the old int16→pydub roundtrip means the
+#      MP3 encoder sees exactly the same signal as the WAV, so the two files
+#      sound as similar as lossy encoding allows.
 # ══════════════════════════════════════════════════════════════════════════════
+import subprocess
+
 print('Step 10: Exporting …')
-out_i16 = (mix * 32767).clip(-32767, 32767).astype(np.int16)
-wavfile.write(OUT_WAV, SR, out_i16)
+
+# WAV — 32-bit float, stereo, 44100 Hz
+sf.write(OUT_WAV, mix, SR, subtype='FLOAT')
 print(f'  ✓  WAV: {os.path.getsize(OUT_WAV)/1e6:.1f} MB')
 
-seg = AudioSegment.from_wav(OUT_WAV)
-seg.export(OUT_MP3, format='mp3', bitrate='192k', tags={
-    'title':  'Dirty Phantom',
-    'artist': 'Claude Code',
-    'album':  'EsDeeKid Type Beat',
-    'genre':  'Jerk / Underground Rap',
-})
-m, s = divmod(int(len(seg) / 1000), 60)
+# MP3 — ffmpeg, 320 kbps, directly from the float32 WAV
+ffmpeg_cmd = [
+    'ffmpeg', '-y',
+    '-i', OUT_WAV,
+    '-codec:a', 'libmp3lame',
+    '-b:a', '320k',
+    '-q:a', '0',          # VBR quality 0 = highest
+    '-id3v2_version', '3',
+    '-metadata', 'title=Dirty Phantom',
+    '-metadata', 'artist=Claude Code',
+    '-metadata', 'album=EsDeeKid Type Beat',
+    '-metadata', 'genre=Jerk / Underground Rap',
+    OUT_MP3,
+]
+result = subprocess.run(ffmpeg_cmd, capture_output=True, text=True)
+if result.returncode != 0:
+    raise RuntimeError(f'ffmpeg failed:\n{result.stderr}')
+
+duration_s = int(os.path.getsize(OUT_WAV) / (SR * 4 * 2))   # float32 stereo
+m, s = divmod(duration_s, 60)
 print(f'  ✓  MP3: {os.path.getsize(OUT_MP3)/1e6:.1f} MB  |  {m}:{s:02d}')
 print('\nDone!')
