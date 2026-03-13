@@ -210,21 +210,29 @@ print(f'  ✓  FIXED_MID saved  ({len(mid.tracks)} tracks)')
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 1 — Load Juicy Jules samples
 # ══════════════════════════════════════════════════════════════════════════════
-print('\nStep 1: Loading Juicy Jules samples …')
-KICK     = load_sample(f'{INST}/☆ Kicks/Kick - Distorted.wav')
-SNARE    = load_sample(f'{INST}/☆ Snares/Snare - Strike.wav')
+JERK = '/Users/ronantakizawa/Documents/instruments/VIRION - BLESSDEEKIT [JERK DRUMKIT]'
+
+print('\nStep 1: Loading samples …')
+print('  Drums  → VIRION BLESSDEEKIT (jerk-specific kit, round-robin)')
+print('  808/FX → Juicy Jules Stardust')
+
+# VIRION BLESSDEEKIT — load all variants per category for round-robin selection
+# Round-robin: each hit picks a random variant → more natural, less machine-gun sound
+KICKS   = [load_sample(f'{JERK}/Kick/Kick ({i}).wav')   for i in range(1, 6)]
+SNARES  = [load_sample(f'{JERK}/Snare/Snare ({i}).wav') for i in range(1, 21)]
+HH_CLS  = [load_sample(f'{JERK}/Hi-Hat/Hi-Hat ({i}).wav')   for i in range(1, 6)]
+HH_OPS  = [load_sample(f'{JERK}/Open Hat/Open Hat ({i}).wav') for i in range(1, 6)]
+CRASHES = [load_sample(f'{JERK}/Crash/Crash ({i}).wav') for i in range(1, 6)]
+PERCS   = [load_sample(f'{JERK}/Perc/Perc ({i}).wav')   for i in range(1, 6)]
+
+# Juicy Jules — 808 + FX (keep these; VIRION 808s untested for tuning)
 CLAP     = load_sample(f'{INST}/☆ Claps/Clap - Layer.wav')
-HH_CL    = load_sample(f'{INST}/☆ Closed Hats/HH - 1.wav')
-HH_OP    = load_sample(f'{INST}/☆ Open Hats/OH - Long.wav')
-CRASH    = load_sample(f'{INST}/☆ Crashes/Crash - Classic.wav')
 LASER    = load_sample(f'{INST}/☆ FX/FX - Laser.wav')
 UGH      = load_sample(f'{INST}/☆ FX/FX - Ugh.wav')
 BASS_808 = load_sample(f'{INST}/☆ 808s/808 - Dark.wav')
 
-# Pitch hi-hats down slightly for darker feel
-HH_CL = pb.Pedalboard([pb.PitchShift(semitones=-2)])(HH_CL[np.newaxis, :], SR)[0]
-HH_OP = pb.Pedalboard([pb.PitchShift(semitones=-1)])(HH_OP[np.newaxis, :], SR)[0]
-print(f'  Kick={len(KICK)/SR:.2f}s  Snare={len(SNARE)/SR:.2f}s  808={len(BASS_808)/SR:.2f}s')
+# No hi-hat pitch shift — keeps spectral centroid higher (fix #1)
+print(f'  Kicks={len(KICKS)}  Snares={len(SNARES)}  HH={len(HH_CLS)}  OH={len(HH_OPS)}  808={len(BASS_808)/SR:.2f}s')
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 2 — Drums (real samples + pyroomacoustics room IR)
@@ -256,54 +264,62 @@ for sec, note_num, vel, _ in drum_events:
         continue
     g = vel / 127.0
 
-    if note_num == 36:   # Kick — tight, no jitter
-        snd = KICK * g
+    if note_num == 36:   # Kick — round-robin from 5 variants, tight (no jitter)
+        snd = KICKS[rng.randint(0, len(KICKS))] * g
         e = min(base_start + len(snd), NSAMP)
         chunk = snd[:e - base_start]
         kick_env[base_start:e] += np.abs(chunk)
         drum_L[base_start:e]   += chunk * 0.95
         drum_R[base_start:e]   += chunk * 0.95
 
-    elif note_num == 38:   # Snare (main vel=95-100 and ghost vel=30-35)
+    elif note_num == 38:   # Snare — round-robin from 20 variants (main + ghost)
         jitter = rng.randint(-MAX_JITTER // 2, MAX_JITTER // 2 + 1)
         start  = int(np.clip(base_start + jitter, 0, NSAMP - 1))
-        snd = SNARE * g * rng.uniform(0.93, 1.07)
+        snd = SNARES[rng.randint(0, len(SNARES))] * g * rng.uniform(0.93, 1.07)
         e   = min(start + len(snd), NSAMP)
         drum_L[start:e] += snd[:e - start] * 0.95
         drum_R[start:e] += snd[:e - start] * 0.95
 
-    elif note_num == 39:   # Clap layer (only on main snare beats)
+    elif note_num == 39:   # Clap layer (Juicy Jules — only on main snare beats)
         snd = CLAP * g * rng.uniform(0.92, 1.08)
         e   = min(base_start + len(snd), NSAMP)
         drum_L[base_start:e] += snd[:e - base_start] * 0.85
         drum_R[base_start:e] += snd[:e - base_start] * 0.85
 
-    elif note_num == 42:   # Closed HH — pan alternating
+    elif note_num == 42:   # Closed HH — round-robin, pan alternating
         pan_toggle = not pan_toggle
         jitter = rng.randint(-MAX_JITTER, MAX_JITTER + 1)
         start  = int(np.clip(base_start + jitter, 0, NSAMP - 1))
-        v  = g * rng.uniform(0.70, 1.00)
-        snd = HH_CL * v
+        v   = g * rng.uniform(0.70, 1.00)
+        snd = HH_CLS[rng.randint(0, len(HH_CLS))] * v
         pr  = 0.62 if pan_toggle else 0.38
         e   = min(start + len(snd), NSAMP)
-        ch  = snd[:e - start] * 0.55
+        ch  = snd[:e - start] * 0.60   # raised from 0.55 (fix #1: more high-freq presence)
         drum_L[start:e] += ch * (1 - pr) * 2
         drum_R[start:e] += ch * pr * 2
 
-    elif note_num == 46:   # Open HH
+    elif note_num == 46:   # Open HH — round-robin
         jitter = rng.randint(-MAX_JITTER // 2, MAX_JITTER // 2 + 1)
         start  = int(np.clip(base_start + jitter, 0, NSAMP - 1))
-        v  = g * rng.uniform(0.70, 0.95)
-        snd = HH_OP * v
+        v   = g * rng.uniform(0.70, 0.95)
+        snd = HH_OPS[rng.randint(0, len(HH_OPS))] * v
         e   = min(start + len(snd), NSAMP)
-        drum_L[start:e] += snd[:e - start] * 0.50
-        drum_R[start:e] += snd[:e - start] * 0.50
+        drum_L[start:e] += snd[:e - start] * 0.62   # raised from 0.50 (fix #1)
+        drum_R[start:e] += snd[:e - start] * 0.62
 
-    elif note_num == 49:   # Crash
-        snd = CRASH * g * 0.65
+    elif note_num == 49:   # Crash — round-robin
+        snd = CRASHES[rng.randint(0, len(CRASHES))] * g * 0.65
         e   = min(base_start + len(snd), NSAMP)
         drum_L[base_start:e] += snd[:e - base_start] * 0.48
         drum_R[base_start:e] += snd[:e - base_start] * 0.52
+
+# VIRION Percs — placed on every 4-bar boundary in Drop sections for extra texture
+for perc_bar in list(range(8, 40, 4)) + list(range(48, 60, 4)):
+    s   = int(perc_bar * BAR * SR)
+    snd = PERCS[rng.randint(0, len(PERCS))] * 0.35
+    e   = min(s + len(snd), NSAMP)
+    drum_L[s:e] += snd[:e - s] * 0.55
+    drum_R[s:e] += snd[:e - s] * 0.45
 
 # Apply room IR (8% wet — dryer than witch house)
 dl_room = fftconvolve(drum_L, room_ir, mode='full')[:NSAMP]
@@ -418,7 +434,7 @@ pad_buf[:, 1] *= (sc_gain * 0.25 + 0.75)
 
 pad_board = pb.Pedalboard([
     pb.Reverb(room_size=0.60, damping=0.55, wet_level=0.30, dry_level=0.90, width=0.90),
-    pb.LowpassFilter(cutoff_frequency_hz=4500),   # darkened from 11k — moody atmospheric pad
+    pb.LowpassFilter(cutoff_frequency_hz=6000),   # raised from 4500 — more presence, closer to reference centroid
     pb.Compressor(threshold_db=-18, ratio=2.5, attack_ms=30, release_ms=400),
     pb.Gain(gain_db=1.0),
 ])
@@ -526,9 +542,9 @@ print('Step 9: Master chain (soft clipper) …')
 master_board = pb.Pedalboard([
     pb.HighpassFilter(cutoff_frequency_hz=30),
     pb.LowpassFilter(cutoff_frequency_hz=18000),
-    pb.Compressor(threshold_db=-10, ratio=2.0, attack_ms=20, release_ms=250),
+    pb.Compressor(threshold_db=-10, ratio=1.5, attack_ms=35, release_ms=250),  # looser: more dynamic range (fix #2)
     pb.Distortion(drive_db=8.0),   # SOFT CLIPPER — critical EsDeeKid signature
-    pb.Gain(gain_db=2.0),
+    pb.Gain(gain_db=0.5),          # reduced from 2.0 dB — bring level closer to reference -8.5 LUFS (fix #3)
     pb.Limiter(threshold_db=-0.5),
 ])
 mix = apply_pb(mix, master_board)
