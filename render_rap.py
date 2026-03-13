@@ -456,7 +456,7 @@ lead_buf = apply_pb(lead_buf, lead_board)
 print(f'  ✓  Lead rendered  notes={len(all_mel)}  max={np.abs(lead_buf).max():.3f}')
 
 # ══════════════════════════════════════════════════════════════════════════════
-# STEP 7 — Laser perc + Vocal chop (FX-Ugh -6st)
+# STEP 7 — Laser perc + Vocal chops (Ugh + staccato vowels + vocal FX adlibs)
 # ══════════════════════════════════════════════════════════════════════════════
 print('\nStep 7: Laser perc + vocal chops …')
 atmos_L = np.zeros(NSAMP, dtype=np.float32)
@@ -464,14 +464,14 @@ atmos_R = np.zeros(NSAMP, dtype=np.float32)
 vocal_L = np.zeros(NSAMP, dtype=np.float32)
 vocal_R = np.zeros(NSAMP, dtype=np.float32)
 
-# Laser perc processed
+GB_VOC = '/Library/Application Support/Logic/Alchemy Samples/Vocals'
+
+# ── Laser perc ────────────────────────────────────────────────────────────────
 laser_board = pb.Pedalboard([
     pb.Reverb(room_size=0.35, wet_level=0.20, dry_level=0.90),
     pb.Gain(gain_db=-3.0),
 ])
 laser_proc = laser_board(LASER[np.newaxis, :], SR)[0].astype(np.float32)
-
-# Place at drop entries and 8-bar accent points
 for drop_bar in [8, 16, 24, 32, 48, 56]:
     s = int(drop_bar * BAR * SR)
     e = min(s + len(laser_proc), NSAMP)
@@ -479,7 +479,7 @@ for drop_bar in [8, 16, 24, 32, 48, 56]:
     atmos_L[s:e] += chunk * 0.55
     atmos_R[s:e] += chunk * 0.45
 
-# Vocal chop: FX-Ugh.wav pitched -6 semitones
+# ── Vocal chop 1: FX-Ugh.wav (−6st, distorted) — accent hits ─────────────────
 ugh_board = pb.Pedalboard([
     pb.PitchShift(semitones=-6),
     pb.Reverb(room_size=0.70, damping=0.55, wet_level=0.50, dry_level=0.60, width=1.0),
@@ -488,20 +488,88 @@ ugh_board = pb.Pedalboard([
     pb.Gain(gain_db=2.0),
 ])
 ugh_proc = ugh_board(UGH[np.newaxis, :], SR)[0].astype(np.float32)
-peak     = np.abs(ugh_proc).max()
-ugh_proc = (ugh_proc / (peak + 1e-9) * 0.28).astype(np.float32)
-
-# Place at drop entries + accent points
-vox_placements = [(8, -0.35), (20, 0.30), (32, -0.20), (48, -0.30), (56, 0.25)]
-for vox_bar, pan in vox_placements:
-    s  = int(vox_bar * BAR * SR)
-    e  = min(s + len(ugh_proc), NSAMP)
-    ch = ugh_proc[:e - s]
+ugh_proc /= (np.abs(ugh_proc).max() + 1e-9)
+ugh_proc *= 0.28
+for vox_bar, pan in [(8, -0.35), (20, 0.30), (32, -0.20), (48, -0.30), (56, 0.25)]:
+    s = int(vox_bar * BAR * SR)
+    e = min(s + len(ugh_proc), NSAMP)
     pr = (pan + 1.0) / 2.0
-    vocal_L[s:e] += ch * (1 - pr) * 2
-    vocal_R[s:e] += ch * pr * 2
+    vocal_L[s:e] += ugh_proc[:e-s] * (1 - pr) * 2
+    vocal_R[s:e] += ugh_proc[:e-s] * pr * 2
 
-print(f'  ✓  Laser percs ({len([8,16,24,32,48,56])} placements) + vocal chops ({len(vox_placements)} placements)')
+# ── Vocal chop 2: Eleanor staccato "Aa" pitched to C#4 — rhythmic vowel hits ──
+# C#4 = MIDI 61. Eleanor Stacc Aa C#3 = MIDI 49 → shift +12st to get C#4
+stacc_paths = [
+    f'{GB_VOC}/Solo Vocals/Staccato/Eleanor Staccato/Eleanor Stacc Aa/Eleanor Stacc Aa 1 C#3.wav',
+    f'{GB_VOC}/Solo Vocals/Staccato/Eleanor Staccato/Eleanor Stacc Aa/Eleanor Stacc Aa 2 E3.wav',
+    f'{GB_VOC}/Solo Vocals/Staccato/Eleanor Staccato/Eleanor Stacc Aa/Eleanor Stacc Aa 3 G3.wav',
+]
+stacc_board = pb.Pedalboard([
+    pb.PitchShift(semitones=12),          # bring up to C#4 range
+    pb.Reverb(room_size=0.55, damping=0.60, wet_level=0.35, dry_level=0.80, width=0.90),
+    pb.LowpassFilter(cutoff_frequency_hz=7000),
+    pb.Gain(gain_db=-2.0),
+])
+stacc_pool = []
+for p in stacc_paths:
+    if os.path.exists(p):
+        raw = load_sample(p)
+        proc = stacc_board(raw[np.newaxis, :], SR)[0].astype(np.float32)
+        proc /= (np.abs(proc).max() + 1e-9)
+        proc *= 0.18
+        stacc_pool.append(proc)
+
+# Place on every 2 bars inside Drop A (bars 9–40) and Drop A Return (bars 49–60)
+# Beat 2 of the bar — sits in the pocket between kick and snare
+if stacc_pool:
+    drop_bars = list(range(9, 40, 2)) + list(range(49, 60, 2))
+    for i, bar in enumerate(drop_bars):
+        snd = stacc_pool[i % len(stacc_pool)]
+        # Beat 2 offset = 1 beat into bar
+        s = int((bar * BAR + BEAT) * SR)
+        e = min(s + len(snd), NSAMP)
+        pan = rng.uniform(-0.4, 0.4)
+        pr  = (pan + 1.0) / 2.0
+        vocal_L[s:e] += snd[:e-s] * (1 - pr) * 2
+        vocal_R[s:e] += snd[:e-s] * pr * 2
+
+# ── Vocal chop 3: Amanda Vocal FX — dark ad-lib texture on section transitions ─
+adlib_paths = [
+    f'{GB_VOC}/Vocal FX And Noises/Amanda Vocal FX/Amanda Vocal FX 0001.wav',
+    f'{GB_VOC}/Vocal FX And Noises/Amanda Vocal FX/Amanda Vocal FX 0004.wav',
+    f'{GB_VOC}/Vocal FX And Noises/Amanda Vocal FX/Amanda Vocal FX 0014.wav',
+    f'{GB_VOC}/Vocal FX And Noises/Amanda Vocal FX/Amanda Vocal FX 0019.wav',
+    f'{GB_VOC}/Vocal FX And Noises/Amanda Vocal FX/Amanda Vocal FX 0042.wav',
+]
+adlib_board = pb.Pedalboard([
+    pb.PitchShift(semitones=-4),
+    pb.Reverb(room_size=0.80, damping=0.50, wet_level=0.60, dry_level=0.50, width=1.0),
+    pb.LowpassFilter(cutoff_frequency_hz=5000),
+    pb.Gain(gain_db=-4.0),
+])
+adlib_pool = []
+for p in adlib_paths:
+    if os.path.exists(p):
+        raw = load_sample(p)
+        proc = adlib_board(raw[np.newaxis, :], SR)[0].astype(np.float32)
+        proc /= (np.abs(proc).max() + 1e-9)
+        proc *= 0.14
+        adlib_pool.append(proc)
+
+# Place at section transition bars: pre-drop, drop entries, break, outro
+if adlib_pool:
+    for i, bar in enumerate([4, 8, 40, 48, 60]):
+        snd = adlib_pool[i % len(adlib_pool)]
+        s = int(bar * BAR * SR)
+        e = min(s + len(snd), NSAMP)
+        pan = rng.uniform(-0.5, 0.5)
+        pr  = (pan + 1.0) / 2.0
+        vocal_L[s:e] += snd[:e-s] * (1 - pr) * 2
+        vocal_R[s:e] += snd[:e-s] * pr * 2
+
+n_stacc = len(drop_bars) if stacc_pool else 0
+n_adlib = 5 if adlib_pool else 0
+print(f'  ✓  Laser (6) + Ugh chops (5) + Staccato vowels ({n_stacc}) + Adlib FX ({n_adlib})')
 
 # ══════════════════════════════════════════════════════════════════════════════
 # STEP 8 — Final mix
