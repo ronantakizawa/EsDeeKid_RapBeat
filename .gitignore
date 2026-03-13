@@ -1,0 +1,14 @@
+# Audio outputs — too large for git
+*.wav
+*.mp3
+*.aiff
+*.aif
+
+# Generated MIDI intermediates
+DirtyPhantom_FIXED.mid
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store

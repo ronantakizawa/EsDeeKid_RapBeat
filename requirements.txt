@@ -1,0 +1,9 @@
+music21>=9.1
+mido>=1.3
+numpy>=1.24
+scipy>=1.11
+soundfile>=0.12
+pydub>=0.25
+pedalboard>=0.9
+dawdreamer>=0.8
+pyroomacoustics>=0.7
